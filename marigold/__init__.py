@@ -19,3 +19,7 @@
 
 
 from .marigold_pipeline import MarigoldPipeline, MarigoldDepthOutput
+from .depth_completion_pipeline import MarigoldPipeline as DepthCompletionPipeline
+from .depth_completion_pipeline import MarigoldDepthOutput as DepthCompletionOutput
+
+
