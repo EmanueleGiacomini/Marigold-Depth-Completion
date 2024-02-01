@@ -20,6 +20,7 @@
 
 from typing import Dict, Union
 
+import matplotlib.pyplot as plt
 import torch
 from torch.utils.data import DataLoader, TensorDataset
 import numpy as np
@@ -35,7 +36,7 @@ from diffusers import (
 from diffusers.utils import BaseOutput
 from transformers import CLIPTextModel, CLIPTokenizer
 
-from .util.image_util import chw2hwc, colorize_depth_maps, resize_max_res
+from .util.image_util import chw2hwc, colorize_depth_maps, resize_max_res, resize_max_res_np
 from .util.batchsize import find_batch_size
 from .util.ensemble import ensemble_depths
 
@@ -83,12 +84,12 @@ class MarigoldPipeline(DiffusionPipeline):
     depth_latent_scale_factor = 0.18215
 
     def __init__(
-        self,
-        unet: UNet2DConditionModel,
-        vae: AutoencoderKL,
-        scheduler: DDIMScheduler,
-        text_encoder: CLIPTextModel,
-        tokenizer: CLIPTokenizer,
+            self,
+            unet: UNet2DConditionModel,
+            vae: AutoencoderKL,
+            scheduler: DDIMScheduler,
+            text_encoder: CLIPTextModel,
+            tokenizer: CLIPTokenizer,
     ):
         super().__init__()
 
@@ -104,16 +105,17 @@ class MarigoldPipeline(DiffusionPipeline):
 
     @torch.no_grad()
     def __call__(
-        self,
-        input_image: Image,
-        denoising_steps: int = 10,
-        ensemble_size: int = 10,
-        processing_res: int = 768,
-        match_input_res: bool = True,
-        batch_size: int = 0,
-        color_map: str = "Spectral",
-        show_progress_bar: bool = True,
-        ensemble_kwargs: Dict = None,
+            self,
+            input_image: Image,
+            input_depth: np.uint16,
+            denoising_steps: int = 10,
+            ensemble_size: int = 10,
+            processing_res: int = 768,
+            match_input_res: bool = True,
+            batch_size: int = 0,
+            color_map: str = "Spectral",
+            show_progress_bar: bool = True,
+            ensemble_kwargs: Dict = None,
     ) -> MarigoldDepthOutput:
         """
         Function invoked when calling the pipeline.
@@ -153,22 +155,31 @@ class MarigoldPipeline(DiffusionPipeline):
 
         if not match_input_res:
             assert (
-                processing_res is not None
+                    processing_res is not None
             ), "Value error: `resize_output_back` is only valid with "
         assert processing_res >= 0
         assert denoising_steps >= 1
         assert ensemble_size >= 1
 
+        import matplotlib.pyplot as plt
         # ----------------- Image Preprocess -----------------
+        # Convert Depth image to 3-Channels
+        # input_depth = np.repeat(input_depth[:, :, np.newaxis], 3, axis=2)
+        input_depth = np.array(input_depth)
+
         # Resize image
         if processing_res > 0:
             input_image = resize_max_res(
                 input_image, max_edge_resolution=processing_res
             )
+            input_depth = resize_max_res_np(
+                input_depth, max_edge_resolution=processing_res
+            )
         # Convert the image to RGB, to 1.remove the alpha channel 2.convert B&W to 3-channel
         input_image = input_image.convert("RGB")
         image = np.asarray(input_image)
 
+        input_depth = np.repeat(input_depth[:, :, np.newaxis], 3, axis=2)
         # Normalize rgb values
         rgb = np.transpose(image, (2, 0, 1))  # [H, W, rgb] -> [rgb, H, W]
         rgb_norm = rgb / 255.0
@@ -176,10 +187,30 @@ class MarigoldPipeline(DiffusionPipeline):
         rgb_norm = rgb_norm.to(device)
         assert rgb_norm.min() >= 0.0 and rgb_norm.max() <= 1.0
 
+        # Normalize depth values
+        depth = np.transpose(input_depth, (2, 0, 1))
+        depth_norm = depth.astype(np.float32) / 256.0
+        tmin = np.percentile(depth_norm, 2)
+        tmax = np.percentile(depth_norm, 98)
+        depth_norm = 2 * ((depth_norm - tmin) / (tmax - tmin) - 0.5)
+        depth_norm = torch.from_numpy(depth_norm).to(self.dtype)
+
+        # fig = plt.figure()
+        # ax0 = fig.add_subplot(121)
+        # ax1 = fig.add_subplot(122)
+        # ax0.imshow(rgb_norm.detach().numpy()[0, :, :])
+        # ax1.imshow(depth_norm.detach().numpy()[0, :, :])
+        # plt.show()
+
         # ----------------- Predicting depth -----------------
         # Batch repeated input image
         duplicated_rgb = torch.stack([rgb_norm] * ensemble_size)
         single_rgb_dataset = TensorDataset(duplicated_rgb)
+
+        rgbd_norm = torch.cat((rgb_norm, depth_norm), 0)
+        duplicated_rgb_depth = torch.stack([rgbd_norm] * ensemble_size)
+        # print('duplicated_rgb_depth shape', duplicated_rgb_depth.shape)
+        single_rgb_depth_dataset = TensorDataset(duplicated_rgb_depth)
         if batch_size > 0:
             _bs = batch_size
         else:
@@ -193,22 +224,53 @@ class MarigoldPipeline(DiffusionPipeline):
             single_rgb_dataset, batch_size=_bs, shuffle=False
         )
 
-        # Predict depth maps (batched)
-        depth_pred_ls = []
+        single_rgb_depth_loader = DataLoader(
+            single_rgb_depth_dataset,
+            batch_size=_bs, shuffle=False)
+
         if show_progress_bar:
-            iterable = tqdm(
-                single_rgb_loader, desc=" " * 2 + "Inference batches", leave=False
-            )
+            iterable = tqdm(single_rgb_depth_loader, desc=" " * 2 + "Inference batches", leave=False)
         else:
-            iterable = single_rgb_loader
+            iterable = single_rgb_depth_loader
+        depth_pred_ls = []
         for batch in iterable:
-            (batched_img,) = batch
-            depth_pred_raw = self.single_infer(
-                rgb_in=batched_img,
+            (batched_rgbd,) = batch
+            batched_rgb = batched_rgbd[:, :3, :, :]
+            batched_depth = batched_rgbd[:, 3:, :, :]
+
+            # encoded_depth = self.encode_depth(batched_depth)
+            # decoded_depth = self.decode_depth(encoded_depth)
+            # print(encoded_depth.shape)
+            # print(decoded_depth.shape)
+            # fig, axs = plt.subplots(1, 2)
+            # axs[0].imshow(batched_depth[0, 0, :, :].numpy())
+            # axs[1].imshow(decoded_depth[0, 0, :, :].numpy())
+            # plt.show()
+            # exit(0)
+
+            depth_pred_raw = self.single_infer_completion(
+                rgb_in= batched_rgb,
+                depth_in= batched_depth,
                 num_inference_steps=denoising_steps,
                 show_pbar=show_progress_bar,
             )
             depth_pred_ls.append(depth_pred_raw.detach().clone())
+        # Predict depth maps (batched)
+        # depth_pred_ls = []
+        # if show_progress_bar:
+        #     iterable = tqdm(
+        #         single_rgb_loader, desc=" " * 2 + "Inference batches", leave=False
+        #     )
+        # else:
+        #     iterable = single_rgb_loader
+        # for batch in iterable:
+        #     (batched_img,) = batch
+        #     depth_pred_raw = self.single_infer(
+        #         rgb_in=batched_img,
+        #         num_inference_steps=denoising_steps,
+        #         show_pbar=show_progress_bar,
+        #     )
+        #     depth_pred_ls.append(depth_pred_raw.detach().clone())
         depth_preds = torch.concat(depth_pred_ls, axis=0).squeeze()
         torch.cuda.empty_cache()  # clear vram cache for ensembling
 
@@ -269,7 +331,7 @@ class MarigoldPipeline(DiffusionPipeline):
 
     @torch.no_grad()
     def single_infer(
-        self, rgb_in: torch.Tensor, num_inference_steps: int, show_pbar: bool
+            self, rgb_in: torch.Tensor, num_inference_steps: int, show_pbar: bool
     ) -> torch.Tensor:
         """
         Perform an individual depth prediction without ensembling.
@@ -394,7 +456,7 @@ class MarigoldPipeline(DiffusionPipeline):
         assert torch.max(depth_in) >= -1.0
 
         # Convert in 3-channels image
-        depth_in = torch.cat((depth_in, depth_in, depth_in), 1)
+        # depth_in = torch.cat((depth_in, depth_in, depth_in), 1)
         # encoder
         h = self.vae.encoder(depth_in)
         moments = self.vae.quant_conv(h)
@@ -402,7 +464,6 @@ class MarigoldPipeline(DiffusionPipeline):
         # scale latent
         depth_latent = mean * self.depth_latent_scale_factor
         return depth_latent
-
 
         ...
 
@@ -438,6 +499,14 @@ class MarigoldPipeline(DiffusionPipeline):
         depth_latent = torch.randn(
             rgb_latent.shape, device=device, dtype=self.dtype
         )  # [B, 4, h, w]
+
+        # print(rgb_latent.detach().cpu().numpy().shape)
+        # print(depth_latent.detach().cpu().numpy().shape)
+
+        # fig, axs = plt.subplots(1, 2)
+        # axs[0].imshow(rgb_latent[0, 0, :, :])
+        # axs[1].imshow(depth_latent[0, 0, :, :])
+        # plt.show()
 
         # Batched empty text embedding
         if self.empty_text_embed is None:

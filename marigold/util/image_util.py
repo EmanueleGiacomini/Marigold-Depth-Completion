@@ -16,8 +16,7 @@
 # Please find bibtex at: https://github.com/prs-eth/Marigold#-citation
 # More information about the method can be found at https://marigoldmonodepth.github.io
 # --------------------------------------------------------------------------
-
-
+import cv2
 import matplotlib
 import numpy as np
 import torch
@@ -97,3 +96,17 @@ def resize_max_res(img: Image.Image, max_edge_resolution: int) -> Image.Image:
 
     resized_img = img.resize((new_width, new_height))
     return resized_img
+
+def resize_max_res_np(img: np.ndarray, max_edge_resolution: int) -> np.ndarray:
+    original_height, original_width = img.shape
+    downscale_factor = min(
+        max_edge_resolution / original_width, max_edge_resolution / original_height
+    )
+
+    new_width = int(original_width * downscale_factor)
+    new_height = int(original_height * downscale_factor)
+
+    resized_img = cv2.resize(img, (new_width, new_height), interpolation=cv2.INTER_NEAREST)
+    print(img.shape, resized_img.shape)
+    return resized_img
+
