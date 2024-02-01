@@ -148,16 +148,12 @@ if __name__ == "__main__":
             device = torch.device("cpu")
             logging.warning("MPS is not available. Running on CPU will be slow.")
     else:
-        device = torch.device("cpu")
-        logging.warning("CUDA is not available. Running on CPU will be slow.")
-
-    #        if torch.cuda.is_available():
-    #            device = torch.device("cuda")
-    #        else:
-    #            device = torch.device("cpu")
-    #            logging.warning("CUDA is not available. Running on CPU will be slow.")
+        if torch.cuda.is_available():
+            device = torch.device("cuda")
+        else:
+            device = torch.device("cpu")
+            logging.warning("CUDA is not available. Running on CPU will be slow.")
     logging.info(f"device = {device}")
-
     # -------------------- Model --------------------
     if half_precision:
         dtype = torch.float16

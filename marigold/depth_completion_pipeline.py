@@ -194,6 +194,7 @@ class MarigoldPipeline(DiffusionPipeline):
         tmax = np.percentile(depth_norm, 98)
         depth_norm = 2 * ((depth_norm - tmin) / (tmax - tmin) - 0.5)
         depth_norm = torch.from_numpy(depth_norm).to(self.dtype)
+        depth_norm = depth_norm.to(device)
 
         # fig = plt.figure()
         # ax0 = fig.add_subplot(121)
