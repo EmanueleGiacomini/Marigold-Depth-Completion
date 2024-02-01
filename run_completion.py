@@ -226,28 +226,27 @@ if __name__ == "__main__":
             depth_pred: np.ndarray = pipe_out.depth_np
             depth_colored: Image.Image = pipe_out.depth_colored
 
-    # Save as npy
-    rgb_name_base = os.path.splitext(os.path.basename(rgb_path))[0]
-    pred_name_base = rgb_name_base + "_pred"
-    npy_save_path = os.path.join(output_dir_npy, f"{pred_name_base}.npy")
-    if os.path.exists(npy_save_path):
-        logging.warning(f"Existing file: '{npy_save_path}' will be overwritten")
-    np.save(npy_save_path, depth_pred)
+            # Save as npy
+            rgb_name_base = os.path.splitext(os.path.basename(rgb_path))[0]
+            pred_name_base = rgb_name_base + "_pred"
+            npy_save_path = os.path.join(output_dir_npy, f"{pred_name_base}.npy")
+            if os.path.exists(npy_save_path):
+                logging.warning(f"Existing file: '{npy_save_path}' will be overwritten")
+            np.save(npy_save_path, depth_pred)
 
-    # Save as 16-bit uint png
-    depth_to_save = (depth_pred * 65535.0).astype(np.uint16)
-    png_save_path = os.path.join(output_dir_tif, f"{pred_name_base}.png")
-    if os.path.exists(png_save_path):
-        logging.warning(f"Existing file: '{png_save_path}' will be overwritten")
-    Image.fromarray(depth_to_save).save(png_save_path, mode="I;16")
+            # Save as 16-bit uint png
+            depth_to_save = (depth_pred * 65535.0).astype(np.uint16)
+            png_save_path = os.path.join(output_dir_tif, f"{pred_name_base}.png")
+            if os.path.exists(png_save_path):
+                logging.warning(f"Existing file: '{png_save_path}' will be overwritten")
+            Image.fromarray(depth_to_save).save(png_save_path, mode="I;16")
 
-    # Colorize
-    colored_save_path = os.path.join(
-        output_dir_color, f"{pred_name_base}_colored.png"
-    )
-    if os.path.exists(colored_save_path):
-        logging.warning(
-            f"Existing file: '{colored_save_path}' will be overwritten"
-        )
-    depth_colored.save(colored_save_path)
-    exit(0)
+            # Colorize
+            colored_save_path = os.path.join(
+                output_dir_color, f"{pred_name_base}_colored.png"
+            )
+            if os.path.exists(colored_save_path):
+                logging.warning(
+                    f"Existing file: '{colored_save_path}' will be overwritten"
+                )
+            depth_colored.save(colored_save_path)
