@@ -49,7 +49,6 @@ if __name__ == '__main__':
     input_depths = [read_depth(os.path.join(args.input_dir, f)) for f in input_depths_path]
     output_depths = (preprocessor(x) for x in input_depths)
     for filename, image in tqdm(zip(input_depths_path, output_depths), total=len(input_depths_path)):
-        print(filename)
         cv2.imwrite(os.path.join(args.output_dir, filename), image)
 
     exit(0)
