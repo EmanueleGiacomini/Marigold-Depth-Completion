@@ -113,7 +113,7 @@ if __name__ == '__main__':
     input_gt = args.input_gt
     from_idx = args.from_index
     to_idx = args.to_index
-    dataset_format = args.gt_format
+    dataset_format = args.dataset
     skip_gt_rows = args.skip_gt_rows
     input_camera_calibration = args.camera_calibration
     input_transform_gt_in_camera = args.transform_gt_in_camera
